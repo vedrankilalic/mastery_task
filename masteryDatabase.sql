@@ -1,6 +1,3 @@
--- Smart Document Processing System - MySQL schema
--- Run this file with a MySQL user that can create databases/tables.
-
 CREATE DATABASE IF NOT EXISTS masterydatabase
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
@@ -81,7 +78,6 @@ CREATE TABLE IF NOT EXISTS document_revisions (
         ON DELETE CASCADE
 );
 
--- Helpful indexes for dashboard and checks
 CREATE INDEX idx_documents_status ON documents (status);
 CREATE INDEX idx_documents_created_at ON documents (created_at);
 CREATE INDEX idx_documents_doc_number ON documents (document_number);

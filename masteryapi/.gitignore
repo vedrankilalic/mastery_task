@@ -36,20 +36,10 @@ build/
 
 
 # =====================
-# FRONTEND (React / Vite)
-# =====================
-masteryclient/node_modules/
-masteryclient/dist/
-
-# =====================
-# ROOT TEST DATA
-# =====================
-/resources/
-
-# =====================
 # ENV
 # =====================
 .env
+env/.env
 
 # =====================
 # LOGS

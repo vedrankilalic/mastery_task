@@ -1,2 +1,25 @@
-readme.md
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets & local overrides
+.env
+.env.*
+!.env.example
+masteryclient/.env
+masteryapi/env/.env
+
+# Build outputs
+**/target/
+masteryclient/dist/
+masteryclient/node_modules/
+
+# IDE
+.idea/
+.vscode/
+
+# Local test assets (if present at repo root)
 /resources/
+
+# Logs
+*.log

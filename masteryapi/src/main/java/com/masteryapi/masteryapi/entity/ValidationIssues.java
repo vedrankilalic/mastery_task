@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -62,5 +63,15 @@ public class ValidationIssues {
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
+    @PrePersist
+    public void prePersist() {
+        this.createdAt = LocalDateTime.now();
+        if (this.isResolved == null) {
+            this.isResolved = Boolean.FALSE;
+        }
+        if (this.severity == null) {
+            this.severity = IssuesSeverity.ERROR;
+        }
+    }
 
 }
