@@ -20,6 +20,7 @@ public class UpdateDocumentRequestDto {
     private String currencyCode;
     private BigDecimal subtotal;
     private BigDecimal taxAmount;
+    private BigDecimal discountAmount;
     private BigDecimal totalAmount;
     private List<LineItemRequestDto> lineItems;
     private Boolean confirmFinalize;

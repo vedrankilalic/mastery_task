@@ -6,6 +6,7 @@ import com.masteryapi.masteryapi.dto.UpdateDocumentRequestDto;
 import com.masteryapi.masteryapi.entity.Documents;
 import com.masteryapi.masteryapi.entity.DocumentsRevision;
 import com.masteryapi.masteryapi.entity.LineItems;
+import com.masteryapi.masteryapi.entity.ParsedDocumentData;
 import com.masteryapi.masteryapi.entity.ValidationIssues;
 import com.masteryapi.masteryapi.mapper.DocumentsMapper;
 import com.masteryapi.masteryapi.types.DocumentsStatus;
@@ -14,6 +15,7 @@ import com.masteryapi.masteryapi.types.IssueTypes;
 import com.masteryapi.masteryapi.types.IssuesSeverity;
 import com.masteryapi.masteryapi.repository.DocumentsRepository;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,6 +83,7 @@ public class DocumentsService {
         document.setCurrencyCode(request.getCurrencyCode());
         document.setSubtotal(request.getSubtotal());
         document.setTaxAmount(request.getTaxAmount());
+        document.setDiscountAmount(request.getDiscountAmount());
         document.setTotalAmount(request.getTotalAmount());
 
         if (request.getLineItems() != null) {
@@ -127,7 +130,12 @@ public class DocumentsService {
 
     private DocumentsDto saveDocumentMetadata(MultipartFile file) {
         FileTypes fileType = resolveFileType(file.getOriginalFilename());
-        FileParserService.ParsedDocumentData parsed = fileParserService.parse(file, fileType);
+        ParsedDocumentData parsed = enrichParsedTotalsFromLineItems(fileParserService.parse(file, fileType));
+
+        LocalDate issueDate = parsed.issueDate();
+        if (issueDate == null && parsed.dueDate() != null) {
+            issueDate = parsed.dueDate();
+        }
 
         Documents document = Documents.builder()
                 .originalFileName(file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown")
@@ -135,11 +143,12 @@ public class DocumentsService {
                 .documentType(parsed.documentType())
                 .supplierName(parsed.supplierName())
                 .documentNumber(parsed.documentNumber())
-                .issueDate(parsed.issueDate())
+                .issueDate(issueDate)
                 .dueDate(parsed.dueDate())
                 .currencyCode(parsed.currencyCode())
                 .subtotal(parsed.subtotal())
                 .taxAmount(parsed.taxAmount())
+                .discountAmount(parsed.discountAmount())
                 .totalAmount(parsed.totalAmount())
                 .status(DocumentsStatus.UPLOADED)
                 .lineItems(new ArrayList<>())
@@ -166,6 +175,128 @@ public class DocumentsService {
         Documents saved = documentRepository.save(document);
 
         return DocumentsMapper.mapToDocumentsDto(saved);
+    }
+
+    /**
+     * Fills header money fields using line sums, OCR header, and — when possible — reconciles with printed
+     * grand total so VAT/discount percentages apply to the invoice subtotal (e.g. 5400), not only ∑ line items.
+     */
+    private static ParsedDocumentData enrichParsedTotalsFromLineItems(ParsedDocumentData p) {
+        if (p.lineItems() == null || p.lineItems().isEmpty()) {
+            return p;
+        }
+        BigDecimal lineSum = BigDecimal.ZERO;
+        for (LineItems li : p.lineItems()) {
+            if (li.getLineTotal() != null) {
+                lineSum = lineSum.add(li.getLineTotal());
+            }
+        }
+        if (lineSum.compareTo(BigDecimal.ZERO) <= 0) {
+            return p;
+        }
+
+        BigDecimal taxRaw = p.taxAmount();
+        BigDecimal discRaw = p.discountAmount();
+        BigDecimal grand = p.totalAmount();
+        BigDecimal headerSub = p.subtotal();
+
+        BigDecimal basisSub = resolveBasisSubtotalForPercentRates(headerSub, grand, taxRaw, discRaw, lineSum);
+
+        BigDecimal normTax = normalizeTaxAmount(taxRaw, basisSub);
+        BigDecimal normDisc = normalizeDiscountAmount(discRaw, basisSub);
+
+        BigDecimal finalTotal;
+        if (grand != null && grand.compareTo(BigDecimal.ZERO) > 0) {
+            finalTotal = grand.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal impliedDisc = basisSub.add(normTax).subtract(finalTotal);
+            if (impliedDisc.compareTo(BigDecimal.ZERO) >= 0) {
+                normDisc = impliedDisc.setScale(2, RoundingMode.HALF_UP);
+            }
+        } else {
+            finalTotal = basisSub.add(normTax).subtract(normDisc).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        return ParsedDocumentData.builder()
+                .documentType(p.documentType())
+                .supplierName(p.supplierName())
+                .documentNumber(p.documentNumber())
+                .issueDate(p.issueDate())
+                .dueDate(p.dueDate())
+                .currencyCode(p.currencyCode())
+                .subtotal(basisSub.setScale(2, RoundingMode.HALF_UP))
+                .taxAmount(normTax)
+                .discountAmount(normDisc)
+                .totalAmount(finalTotal)
+                .lineItems(p.lineItems())
+                .build();
+    }
+
+    /**
+     * Prefer OCR subtotal; else back-solve from grand total when tax/discount are rate-like (e.g. 10 and 20),
+     * so 4860 / (1 + 0.10 − 0.20) = 5400 instead of using ∑ lines (2700) for 20% discount.
+     */
+    private static BigDecimal resolveBasisSubtotalForPercentRates(
+            BigDecimal headerSub,
+            BigDecimal grand,
+            BigDecimal taxRaw,
+            BigDecimal discRaw,
+            BigDecimal lineSum) {
+        if (headerSub != null && headerSub.compareTo(BigDecimal.ZERO) > 0) {
+            return headerSub;
+        }
+        if (grand != null
+                && grand.compareTo(BigDecimal.ZERO) > 0
+                && looksLikeRatePercent(taxRaw)
+                && (discRaw == null
+                        || discRaw.compareTo(BigDecimal.ZERO) == 0
+                        || looksLikeRatePercent(discRaw))) {
+            BigDecimal discRate =
+                    discRaw == null || discRaw.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : discRaw;
+            BigDecimal factor = BigDecimal.ONE
+                    .add(taxRaw.movePointLeft(2))
+                    .subtract(discRate.movePointLeft(2));
+            if (factor.compareTo(new BigDecimal("0.01")) > 0) {
+                return grand.divide(factor, 4, RoundingMode.HALF_UP);
+            }
+        }
+        return lineSum;
+    }
+
+    private static boolean looksLikeRatePercent(BigDecimal raw) {
+        return raw != null
+                && raw.compareTo(BigDecimal.ZERO) > 0
+                && raw.compareTo(BigDecimal.valueOf(99)) <= 0;
+    }
+
+    /**
+     * If tax is a small integer compared to subtotal, treat it as a percentage (10 → 10% of subtotal).
+     */
+    private static BigDecimal normalizeTaxAmount(BigDecimal tax, BigDecimal subtotal) {
+        if (tax == null || tax.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        if (subtotal == null || subtotal.compareTo(BigDecimal.ZERO) <= 0) {
+            return tax;
+        }
+        if (subtotal.compareTo(tax.multiply(BigDecimal.valueOf(50))) > 0 && tax.compareTo(BigDecimal.valueOf(99)) <= 0) {
+            return subtotal.multiply(tax).movePointLeft(2).setScale(2, RoundingMode.HALF_UP);
+        }
+        return tax.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Same idea as tax: "20" next to Discount often means 20% of subtotal. */
+    private static BigDecimal normalizeDiscountAmount(BigDecimal discount, BigDecimal subtotal) {
+        if (discount == null || discount.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        if (subtotal == null || subtotal.compareTo(BigDecimal.ZERO) <= 0) {
+            return discount.setScale(2, RoundingMode.HALF_UP);
+        }
+        if (subtotal.compareTo(discount.multiply(BigDecimal.valueOf(50))) > 0
+                && discount.compareTo(BigDecimal.valueOf(99)) <= 0) {
+            return subtotal.multiply(discount).movePointLeft(2).setScale(2, RoundingMode.HALF_UP);
+        }
+        return discount.setScale(2, RoundingMode.HALF_UP);
     }
 
     private void replaceLineItemsFromRequest(Documents document, List<LineItemRequestDto> dtos) {
@@ -221,7 +352,11 @@ public class DocumentsService {
                     .build());
         }
 
-        if (hasTotalMismatch(document.getSubtotal(), document.getTaxAmount(), document.getTotalAmount())) {
+        if (hasTotalMismatch(
+                document.getSubtotal(),
+                document.getTaxAmount(),
+                document.getDiscountAmount(),
+                document.getTotalAmount())) {
             issues.add(ValidationIssues.builder()
                     .issueType(IssueTypes.TOTAL_MISMATCH)
                     .fieldName("totalAmount")
@@ -271,11 +406,13 @@ public class DocumentsService {
         return issues;
     }
 
-    private boolean hasTotalMismatch(BigDecimal subtotal, BigDecimal taxAmount, BigDecimal totalAmount) {
+    private boolean hasTotalMismatch(
+            BigDecimal subtotal, BigDecimal taxAmount, BigDecimal discountAmount, BigDecimal totalAmount) {
         if (subtotal == null || taxAmount == null || totalAmount == null) {
             return false;
         }
-        return subtotal.add(taxAmount).compareTo(totalAmount) != 0;
+        BigDecimal disc = discountAmount == null ? BigDecimal.ZERO : discountAmount;
+        return subtotal.add(taxAmount).subtract(disc).compareTo(totalAmount) != 0;
     }
 
     private boolean isInvalidDateRange(LocalDate issueDate, LocalDate dueDate) {
@@ -322,7 +459,7 @@ public class DocumentsService {
 
     private String toJsonSnapshot(Documents document) {
         return String.format(
-                "{\"supplierName\":\"%s\",\"documentNumber\":\"%s\",\"documentType\":\"%s\",\"issueDate\":\"%s\",\"dueDate\":\"%s\",\"currencyCode\":\"%s\",\"subtotal\":\"%s\",\"taxAmount\":\"%s\",\"totalAmount\":\"%s\",\"status\":\"%s\"}",
+                "{\"supplierName\":\"%s\",\"documentNumber\":\"%s\",\"documentType\":\"%s\",\"issueDate\":\"%s\",\"dueDate\":\"%s\",\"currencyCode\":\"%s\",\"subtotal\":\"%s\",\"taxAmount\":\"%s\",\"discountAmount\":\"%s\",\"totalAmount\":\"%s\",\"status\":\"%s\"}",
                 safe(document.getSupplierName()),
                 safe(document.getDocumentNumber()),
                 document.getDocumentType() == null ? "" : document.getDocumentType().name(),
@@ -331,6 +468,7 @@ public class DocumentsService {
                 safe(document.getCurrencyCode()),
                 document.getSubtotal() == null ? "" : document.getSubtotal(),
                 document.getTaxAmount() == null ? "" : document.getTaxAmount(),
+                document.getDiscountAmount() == null ? "" : document.getDiscountAmount(),
                 document.getTotalAmount() == null ? "" : document.getTotalAmount(),
                 document.getStatus() == null ? "" : document.getStatus().name()
         );

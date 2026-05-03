@@ -55,6 +55,7 @@ export function DocumentDetailPage() {
           currencyCode: data.currencyCode ?? "",
           subtotal: data.subtotal ?? 0,
           taxAmount: data.taxAmount ?? 0,
+          discountAmount: data.discountAmount ?? 0,
           totalAmount: data.totalAmount ?? 0,
         });
         setLineItems(mapLineItemsFromApi(data.lineItems));
@@ -129,6 +130,7 @@ export function DocumentDetailPage() {
         currencyCode: updated.currencyCode ?? "",
         subtotal: updated.subtotal ?? 0,
         taxAmount: updated.taxAmount ?? 0,
+        discountAmount: updated.discountAmount ?? 0,
         totalAmount: updated.totalAmount ?? 0,
       });
       setLineItems(mapLineItemsFromApi(updated.lineItems));
@@ -170,6 +172,7 @@ export function DocumentDetailPage() {
                 currencyCode: document.currencyCode ?? "",
                 subtotal: document.subtotal ?? 0,
                 taxAmount: document.taxAmount ?? 0,
+                discountAmount: document.discountAmount ?? 0,
                 totalAmount: document.totalAmount ?? 0,
               });
               setLineItems(mapLineItemsFromApi(document.lineItems));
@@ -305,7 +308,7 @@ export function DocumentDetailPage() {
                   />
                 </div>
 
-                <div className="col-md-4">
+                <div className="col-md-3">
                   <label className="form-label">Subtotal</label>
                   <input
                     className="form-control"
@@ -323,7 +326,7 @@ export function DocumentDetailPage() {
                   />
                 </div>
 
-                <div className="col-md-4">
+                <div className="col-md-3">
                   <label className="form-label">Tax</label>
                   <input
                     className="form-control"
@@ -341,7 +344,25 @@ export function DocumentDetailPage() {
                   />
                 </div>
 
-                <div className="col-md-4">
+                <div className="col-md-3">
+                  <label className="form-label">Discount</label>
+                  <input
+                    className="form-control"
+                    type="number"
+                    step="0.01"
+                    disabled={!editMode}
+                    value={form.discountAmount ?? 0}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        discountAmount: Number(e.target.value),
+                      }))
+                    }
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div className="col-md-3">
                   <label className="form-label">Total</label>
                   <input
                     className="form-control"

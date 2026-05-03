@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS documents (
     currency_code CHAR(3) NULL,
     subtotal DECIMAL(18,2) NULL,
     tax_amount DECIMAL(18,2) NULL,
+    discount_amount DECIMAL(18,2) NULL,
     total_amount DECIMAL(18,2) NULL,
     status ENUM('UPLOADED', 'NEEDS_REVIEW', 'VALIDATED', 'REJECTED') NOT NULL DEFAULT 'UPLOADED',
     source_payload JSON NULL,

@@ -78,6 +78,9 @@ public class Documents {
     @Column(name = "tax_amount")
     private BigDecimal taxAmount;
 
+    @Column(name = "discount_amount")
+    private BigDecimal discountAmount;
+
     @Column(name = "total_amount")
     private BigDecimal totalAmount;
 

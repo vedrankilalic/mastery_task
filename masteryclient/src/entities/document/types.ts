@@ -17,6 +17,7 @@ export interface DocumentDetail extends UploadedDocument {
   dueDate?: string;
   subtotal?: number;
   taxAmount?: number;
+  discountAmount?: number;
   totalAmount?: number;
   lineItems?: {
     id: number;
@@ -92,6 +93,7 @@ export interface UpdateDocumentPayload {
   currencyCode?: string;
   subtotal?: number;
   taxAmount?: number;
+  discountAmount?: number;
   totalAmount?: number;
   lineItems?: Array<{
     lineNo?: number;

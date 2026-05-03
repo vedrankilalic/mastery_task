@@ -26,6 +26,7 @@ public class DocumentsDto {
     private String currencyCode;
     private BigDecimal subtotal;
     private BigDecimal taxAmount;
+    private BigDecimal discountAmount;
     private BigDecimal totalAmount;
     private List<LineItemsDto> lineItems;
     private List<ValidationIssuesDto> validationIssues;

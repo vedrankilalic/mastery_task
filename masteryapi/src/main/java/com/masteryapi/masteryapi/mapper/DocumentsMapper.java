@@ -23,6 +23,7 @@ public class DocumentsMapper {
                 .currencyCode(doc.getCurrencyCode())
                 .subtotal(doc.getSubtotal())
                 .taxAmount(doc.getTaxAmount())
+                .discountAmount(doc.getDiscountAmount())
                 .totalAmount(doc.getTotalAmount())
                 .lineItems(mapLineItems(doc.getLineItems()))
                 .validationIssues(mapValidationIssues(doc.getValidationIssues()))
